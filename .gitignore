@@ -1,0 +1,4 @@
+.zig-cache
+.direnv
+.env
+.pre-commit-config.yaml
