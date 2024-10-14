@@ -4,69 +4,43 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "aarch64-darwin" ];
 
-      imports = [ inputs.git-hooks-nix.flakeModule ];
-
       perSystem =
         {
-          pkgs,
+          lib,
           inputs',
           system,
+          config,
           ...
         }:
+        let
+          zig-env = inputs.zig2nix.zig-env.${system} { zig = inputs'.zig2nix.packages.zig.master.bin; };
+          system-triple = zig-env.lib.zigTripleFromString system;
+        in
         {
-          _module.args.pkgs = import inputs.nixpkgs {
-            inherit system;
-
-            overlays = [
-              (_: prev: {
-                cleanZlinkySource =
-                  src:
-                  prev.lib.sourceByRegex
-                    (prev.lib.cleanSourceWith {
-                      inherit src;
-                      filter = prev.lib.cleanSourceFilter;
-                    })
-
-                    # Only include relevant files in package source
-                    [
-                      "^build.zig$"
-                      "^build.zig.zon$"
-                      "^src/.*\.zig$"
-                      "^build.zig.zon.nix$"
-                    ];
-              })
-            ];
+          packages.zlinky = config.legacyPackages.zlinky.${system-triple}.override {
+            zigPreferMusl = false;
+            zigDisableWrap = false;
           };
 
-          packages = {
-            zlinky = pkgs.stdenv.mkDerivation {
-              pname = "zlinky";
-              version = "0.0.0";
-              src = pkgs.cleanZlinkySource ./.;
+          legacyPackages.zlinky = lib.genAttrs zig-env.lib.allTargetTriples (
+            target:
+            zig-env.packageForTarget target {
+              src = lib.cleanSource ./.;
 
-              nativeBuildInputs = [ pkgs.zig.hook ];
+              zigPreferMusl = true;
+              zigDisableWrap = true;
+            }
+          );
 
-              postPatch = ''
-                ln -s ${pkgs.callPackage ./build.zig.zon.nix { }} $ZIG_GLOBAL_CACHE_DIR/p
-              '';
-            };
-
-            # Regenerate build.zig.zon.nix after dependencies changes
-            lock-dependencies = pkgs.writeShellApplication {
-              name = "lock-dependencies";
-              runtimeInputs = [ pkgs.zon2nix ];
-              text = "zon2nix > build.zig.zon.nix";
-            };
-          };
-
-          devShells.default = pkgs.mkShell { packages = [ inputs'.zig.packages.master ]; };
+          apps.lock-dependencies = zig-env.app [ zig-env.zon2json-lock ] "zon2json-lock build.zig.zon";
+          devShells.default = zig-env.mkShell { name = "zlinky-dev"; };
         };
     };
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/release-24.05";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    zig.url = "github:mitchellh/zig-overlay";
-    git-hooks-nix.url = "github:cachix/git-hooks.nix";
+    zig2nix.url = "github:Cloudef/zig2nix";
+    zig2nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 }
